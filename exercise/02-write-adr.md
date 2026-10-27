@@ -35,10 +35,10 @@ language: Thai
 
 | เกณฑ์ | Run a | Run b |
 |---|---|---|
-| ใช้ตัวเลขจาก scenario หรือไม่ (latency, ช่วงพีก, ข้อจำกัดของ MailFast) | | |
-| ทางเลือกที่พิจารณา (ระบุ) | | |
-| จัดการแต้มสะสมแบบ "ครั้งเดียวเท่านั้น" และ rate limit ของ MailFast หรือไม่ อย่างไร | | |
-| มีสิ่งที่แต่งขึ้นเองหรือไม่ (ตัวเลข เครื่องมือ หรือข้อเท็จจริงที่ไม่มีใน scenario) | | |
+| ใช้ตัวเลขจาก scenario หรือไม่ (latency, ช่วงพีก, ข้อจำกัดของ MailFast) | ไม่ใช้เลย เพราะไม่ได้อ่าน scenario ตัวเลขทุกอย่าง (ปริมาณ order, latency, SLA ของ MailFast) ถูกย้ายไปไว้ใน Open questions แทน ไม่ได้เดาค่าเอง | ใช้ครบ มีตารางตัวเลข: p95 ≤ 500 ms (ตอนนี้ 300 ms), 200 orders/s, MailFast p95 1.5 s / p99 8 s / ล้ม 0.5% / 50 emails/s, แต้มภายใน 1 นาที แล้วเอาไปคำนวณต่อ เช่น ถ้าเรียก MailFast ตรง ๆ p95 จะเป็น ~1.8 s และช่วงพีก email จะค้าง ~150 ฉบับ/วินาที |
+| ทางเลือกที่พิจารณา (ระบุ) | 3 ทาง: (A) เรียกทุกอย่างแบบ synchronous ใน checkout (B) publish/subscribe ผ่าน message broker (C) ทำ post-order orchestrator แยก → เลือก B แต่**ไม่เลือกยี่ห้อ broker** | 4 ทาง: (1) sync gRPC fan-out (2) ยิง goroutine แบบ async ใน checkout (3) RabbitMQ (4) Kafka → เลือก RabbitMQ เพราะทีมเคยใช้และ self-hosted ได้ ตัวเลือกเจาะจงกับสถานการณ์มากกว่า |
+| จัดการแต้มสะสมแบบ "ครั้งเดียวเท่านั้น" และ rate limit ของ MailFast หรือไม่ อย่างไร | แต้ม: บอกกว้าง ๆ ว่า consumer ต้อง idempotent ใช้ order ID กันซ้ำ / rate limit: พูดแค่ว่า "ถ้า MailFast ล่มหรือ rate-limit ให้ retry + dead-letter queue" ไม่รู้ว่าจำกัดที่ 50/s จึงไม่ได้ออกแบบรองรับ | แต้ม: `loyaltyservice` เก็บ `order_id` ที่ทำแล้วใน transaction เดียวกับการเพิ่มแต้ม (unique constraint), แยก queue ไม่ให้ติดคิว email, alert ถ้าค้างเกิน 30 s / rate limit: ใช้ queue เป็น buffer แล้วส่งออกด้วย rate limiter 50/s รวมทุก replica + retry + DLQ |
+| มีสิ่งที่แต่งขึ้นเองหรือไม่ (ตัวเลข เครื่องมือ หรือข้อเท็จจริงที่ไม่มีใน scenario) | แทบไม่มี สิ่งที่เดาติดป้าย [Inferred] ไว้ (เช่น "checkout น่าจะเรียก emailservice") ยกชื่อ Kafka / Pub/Sub แค่เป็นตัวอย่าง | มีบ้าง: บอกว่า frontend เขียนด้วย Go และจะใช้ Locust `loadgenerator` ทำ load test ซึ่งไม่มีในไฟล์ที่ให้อ่าน (น่าจะมาจากความรู้เดิม), ตัดสินใจเองว่าจะสร้าง `email-notifier` เป็น Go service ใหม่แทน `emailservice` ทั้งตัว และเดาว่า email อาจช้า "หลายนาทีถึงหลายชั่วโมง" ส่วน RabbitMQ 3 nodes ติดป้าย [Inferred] ไว้ |
 
 ## รับผิดชอบ ADR ฉบับสุดท้ายของตัวเอง
 
@@ -51,6 +51,6 @@ language: Thai
 
 | # | สิ่งที่เปลี่ยนจากร่างของ AI | เหตุผล |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
+| 1 | เพิ่ม transactional outbox (PostgreSQL) ให้ `checkoutservice` ใน Decision, Risks, Consequences และ diagram แล้วลบข้อ Outbox ออกจาก Open questions | ร่างของ AI บอกว่าถ้าส่ง event ไป RabbitMQ ไม่สำเร็จ order ก็ยังสำเร็จต่อ แปลว่า event หายได้ ลูกค้าจ่ายเงินแล้วแต่ไม่ได้แต้ม ซึ่งผิด requirement ที่ต้องได้แต้ม AI รู้ปัญหานี้แต่ไม่ได้ตัดสินใจ ปล่อยไว้ใน Open questions |
+| 2 | ลบข้อมูลที่ไม่มีหลักฐาน: "frontend เป็น Go" ใน diagram และ "ใช้ Locust `loadgenerator`" ใน Validation | ไฟล์ที่ให้ AI อ่าน (scenario, ADR 0001, `checkoutservice/main.go`) ไม่ได้บอกเรื่องนี้ AI เดาเอาเอง ADR ควรมีแต่ข้อมูลที่มีหลักฐาน |
+| 3 | ใช้ `emailservice` เดิม (เปลี่ยนจาก mock เป็น consumer ที่อ่านจาก queue) แทนการสร้าง `email-notifier` ใหม่ | requirement บอกให้แทนแค่ logic ที่เป็น mock ใน `emailservice` ไม่ได้บอกให้สร้าง service ใหม่ และทีมมีแค่ 4 คน การแก้ตัวเดิมใช้แรงน้อยกว่าและไม่ต้อง deploy ของใหม่เพิ่ม |
